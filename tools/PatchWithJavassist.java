@@ -83,6 +83,7 @@ public class PatchWithJavassist {
                 
                 // 타겟 클래스에서 원본 메소드 찾기
                 boolean isConstructor = methodName.equals("<init>");
+                boolean isClassInitializer = methodName.equals("<clinit>");
                 CtBehavior targetMethod = null;
                 
                 if (isConstructor) {
@@ -92,6 +93,8 @@ public class PatchWithJavassist {
                             break;
                         }
                     }
+                } else if (isClassInitializer) {
+                    targetMethod = targetCc.getClassInitializer();
                 } else {
                     targetMethod = targetCc.getMethod(methodName, methodDesc);
                 }
@@ -180,6 +183,12 @@ public class PatchWithJavassist {
                     System.out.println("Removed existing constructor.");
                     break;
                 }
+            }
+        } else if (methodName.equals("<clinit>")) {
+            CtConstructor classInit = targetCc.getClassInitializer();
+            if (classInit != null) {
+                targetCc.removeConstructor(classInit);
+                System.out.println("Removed existing class initializer.");
             }
         } else {
             try {
