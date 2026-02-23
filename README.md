@@ -46,6 +46,16 @@ cd /home/chahyang/.gemini/antigravity/brain/3f6e056a-bd5b-4578-a1ea-b34e1aabdd34
 *   `[FAILURE]`: 패치 과정 중 오류 발생 (예: CP 불일치).
 *   `[ERROR]`: 파일은 생성되었으나 `javap` 검사 실패 (파일 깨짐).
 
+## 3. 작동 원리 (내부 로직)
+1.  **Hex 파싱**: 텍스트 파일의 바이트코드를 바이트 배열로 변환합니다.
+2.  **Javassist 주입**:
+    *   `Reference Class` 유무에 따라 `MethodInfo`를 생성하고, `CTMethod.copy` 등을 통해 원본 클래스로 이식합니다.
+3.  **ASM 프레임 재계산**:
+    *   `ASM ClassWriter(COMPUTE_FRAMES)`옵션을 사용하여 스택 맵 프레임을 재계산합니다.
+4.  **검증**:
+    *   생성된 파일을 `javap -p`로 실행하여 Exit Code를 확인합니다.
+
+## 4. 업데이트 히스토리
 ### [2026-02-23] 다중 순차 패치 시 상수풀(CP) 인덱스 꼬임 문제 해결
 *   **문제 상황**: 한 클래스 파일에 여러 번 연속으로 패치를 적용할 경우 (`--diff` 또는 기본 모드), 두 번째 패치부터 `ClassCastException` 이나 `VerifyError` 가 발생하는 치명적인 버그가 있었습니다.
 *   **원인**: ASM의 `ClassWriter(COMPUTE_FRAMES)` 옵션이 스택 프레임을 재계산하면서 기존의 상수풀(Constant Pool) 구조를 완전히 갈아엎고 최적화하여 인덱스를 새로 매기기 때문이었습니다. 이로 인해 두 번째 패치 시, 기존 텍스트 파일(buggy)이 기억하고 있던 원본 상수풀 인덱스 번호가 뒤섞인 대상 클래스(Patched)의 인덱스와 더 이상 일치하지 않게 되었습니다.
@@ -58,11 +68,4 @@ cd /home/chahyang/.gemini/antigravity/brain/3f6e056a-bd5b-4578-a1ea-b34e1aabdd34
 *   **해결 방법**: 패치 대상 메소드의 이름이 `<clinit>`인 경우를 명시적으로 식별하여 일반 `getMethod()` 대신 `getClassInitializer()` 메서드를 사용하여 클래스 초기화 블록을 정확히 불러와 교체하도록 `PatchWithJavassist.java`의 로직 분기문을 추가 수정했습니다.
 *   **결과**: 이제 T5 모델이 예측한 패치 데이터가 일반 함수, 생성자, 혹은 정적 초기화 블록(Static Block)이더라도 모두 완벽하게 식별하여 차분 패치 및 프레임 재계산을 수행할 수 있습니다.
 
-## 3. 작동 원리 (내부 로직)
-1.  **Hex 파싱**: 텍스트 파일의 바이트코드를 바이트 배열로 변환합니다.
-2.  **Javassist 주입**:
-    *   `Reference Class` 유무에 따라 `MethodInfo`를 생성하고, `CTMethod.copy` 등을 통해 원본 클래스로 이식합니다.
-3.  **ASM 프레임 재계산**:
-    *   `ASM ClassWriter(COMPUTE_FRAMES)`옵션을 사용하여 스택 맵 프레임을 재계산합니다.
-4.  **검증**:
-    *   생성된 파일을 `javap -p`로 실행하여 Exit Code를 확인합니다.
+
