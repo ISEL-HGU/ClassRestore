@@ -59,8 +59,8 @@ cd /home/chahyang/.gemini/antigravity/brain/3f6e056a-bd5b-4578-a1ea-b34e1aabdd34
 ### [2026-02-23] 다중 순차 패치 시 상수풀(CP) 인덱스 꼬임 문제 해결
 *   **문제 상황**: 한 클래스 파일에 여러 번 연속으로 패치를 적용할 경우 (`--diff` 또는 기본 모드), 두 번째 패치부터 `ClassCastException` 이나 `VerifyError` 가 발생하는 치명적인 버그가 있었습니다.
 *   **원인**: ASM의 `ClassWriter(COMPUTE_FRAMES)` 옵션이 스택 프레임을 재계산하면서 기존의 상수풀(Constant Pool) 구조를 완전히 갈아엎고 최적화하여 인덱스를 새로 매기기 때문이었습니다. 이로 인해 두 번째 패치 시, 기존 텍스트 파일(buggy)이 기억하고 있던 원본 상수풀 인덱스 번호가 뒤섞인 대상 클래스(Patched)의 인덱스와 더 이상 일치하지 않게 되었습니다.
-*   **해결 방법**: `ClassReader` 객체를 `ClassWriter` 생성자에 함께 인자로 넘겨주어(`new ClassWriter(cr, ClassWriter.COMPUTE_FRAMES)`), ASM이 기존 상수풀 구조를 파괴하지 않고 완벽하게 보존(Preserve)하면서 오직 새 프레임 정보와 추가된 상수들만 맨 뒤에 이어붙이도록 `PatchWithJavassist.java` 로직을 수정했습니다.
-*   **결과**: 이제 원본 클래스뿐만 아니라 이미 기능이 패치된 클래스 파일을 대상으로도 몇 번이고 안정적으로 추가 패치를 수행하여 기능을 누적할 수 있습니다.
+*   **해결 방법**: `ClassReader` 객체를 `ClassWriter` 생성자에 함께 인자로 넘겨주어(`new ClassWriter(cr, ClassWriter.COMPUTE_FRAMES)`), ASM이 기존 상수풀 구조를 파괴하지 않고 완벽하게 보존(Preserve)하도록 수정했습니다. **이로 인해 모델이 생성한 패치에 완전히 새로운 정보(새로운 문자열, 새로운 함수 호출 등)가 포함되어 있더라도, 기존 인덱스는 절대 건드리지 않고 상수풀의 맨 마지막 번호 뒤에 새로운 인덱스를 조용히 덧붙이는(Append) 방식으로 동작**하게 되었습니다.
+*   **결과**: 패치 횟수에 상관없이 기준이 되는 상수풀 번호판이 항상 완벽하게 보존되므로, 동일한 클래스에 대해 **무한정 다중 누적 패치(Sequential Patching)**가 가능해졌습니다.
 
 ### [2026-02-23] 클래스 초기화 정적 블록(`<clinit>`) 패치 불가 문제 해결
 *   **문제 상황**: `static { ... }` 으로 선언된 정적 초기화 블록에 대한 패치를 시도할 경우, `PatchWithJavassist`가 해당 메소드를 찾지 못하고 `javassist.NotFoundException: <clinit>(..) is not found` 에러를 발생시키며 중단되었습니다.
