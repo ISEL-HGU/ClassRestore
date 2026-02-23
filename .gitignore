@@ -1,0 +1,5 @@
+output/
+*.class
+*.log
+.DS_Store
+.idea/
