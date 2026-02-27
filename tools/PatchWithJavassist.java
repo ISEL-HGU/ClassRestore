@@ -72,6 +72,10 @@ public class PatchWithJavassist {
                 String origHexString = new String(Files.readAllBytes(Paths.get(originalHexPath))).trim().replaceAll("\\s+", "");
                 byte[] origMethodBytes = hexStringToByteArray(origHexString);
                 
+                // =============== FIX T5 HALLUCINATIONS ===============
+                System.out.println("Synchronizing attribute indices from Original Hex to Patched Hex...");
+                alignAttributeIndices(patchedMethodBytes, origMethodBytes, targetCp);
+                
                 // 원본 Hex를 타겟 CP로 파싱하여 정확한 메소드 이름/타입 알아내기
                 MethodInfo originalMethodInfo = createMethodInfoFromBytes(origMethodBytes, targetCp, true);
                 String methodName = originalMethodInfo.getName();
@@ -240,6 +244,83 @@ public class PatchWithJavassist {
                 }
             }
             return methodInfo;
+        }
+    }
+
+    private static void alignAttributeIndices(byte[] patched, byte[] orig, ConstPool cp) {
+        try {
+            java.nio.ByteBuffer pBuf = java.nio.ByteBuffer.wrap(patched);
+            java.nio.ByteBuffer oBuf = java.nio.ByteBuffer.wrap(orig);
+            
+            pBuf.getShort(); oBuf.getShort(); // access
+            
+            int oName = oBuf.getShort() & 0xFFFF;
+            int pNamePos = pBuf.position();
+            pBuf.getShort();
+            patched[pNamePos] = (byte)(oName >> 8);
+            patched[pNamePos+1] = (byte)(oName);
+            
+            int oDesc = oBuf.getShort() & 0xFFFF;
+            int pDescPos = pBuf.position();
+            pBuf.getShort();
+            patched[pDescPos] = (byte)(oDesc >> 8);
+            patched[pDescPos+1] = (byte)(oDesc);
+            
+            int pAttrCount = pBuf.getShort() & 0xFFFF;
+            int oAttrCount = oBuf.getShort() & 0xFFFF;
+            
+            int minAttr = Math.min(pAttrCount, oAttrCount);
+            for (int i = 0; i < minAttr; i++) {
+                alignAttribute(pBuf, oBuf, patched, cp);
+            }
+        } catch (Exception e) {
+            System.out.println("Warning: Attribute alignment incomplete: " + e.getMessage());
+        }
+    }
+
+    private static void alignAttribute(java.nio.ByteBuffer pBuf, java.nio.ByteBuffer oBuf, byte[] patched, ConstPool cp) {
+        int oNameIdx = oBuf.getShort() & 0xFFFF;
+        int pNameIdxPos = pBuf.position();
+        pBuf.getShort();
+        
+        patched[pNameIdxPos] = (byte)(oNameIdx >> 8);
+        patched[pNameIdxPos+1] = (byte)(oNameIdx);
+        
+        int pLen = pBuf.getInt();
+        int oLen = oBuf.getInt();
+        
+        int pEnd = pBuf.position() + pLen;
+        int oEnd = oBuf.position() + oLen;
+        
+        String attrName = null;
+        try { attrName = cp.getUtf8Info(oNameIdx); } catch(Exception e) {}
+        
+        if ("Code".equals(attrName)) {
+            pBuf.getShort(); oBuf.getShort(); // max_stack
+            pBuf.getShort(); oBuf.getShort(); // max_locals
+            
+            int pCodeLen = pBuf.getInt();
+            int oCodeLen = oBuf.getInt();
+            
+            pBuf.position(pBuf.position() + pCodeLen);
+            oBuf.position(oBuf.position() + oCodeLen);
+            
+            int pExcLen = pBuf.getShort() & 0xFFFF;
+            int oExcLen = oBuf.getShort() & 0xFFFF;
+            
+            pBuf.position(pBuf.position() + pExcLen * 8);
+            oBuf.position(oBuf.position() + oExcLen * 8);
+            
+            int pInnerCount = pBuf.getShort() & 0xFFFF;
+            int oInnerCount = oBuf.getShort() & 0xFFFF;
+            
+            int minInner = Math.min(pInnerCount, oInnerCount);
+            for (int i = 0; i < minInner; i++) {
+                alignAttribute(pBuf, oBuf, patched, cp);
+            }
+        } else {
+            pBuf.position(pEnd);
+            oBuf.position(oEnd);
         }
     }
 
