@@ -115,7 +115,7 @@ public class PatchWithJavassist {
                     targetMethod.getMethodInfo().addAttribute(patchedCodeAttr);
                     System.out.println("Successfully replaced CodeAttribute via differential patching.");
                 } else {
-                    System.out.println("WARNING: Patched MethodInfo has no CodeAttribute!");
+                    throw new RuntimeException("Patch rejected: Malformed CodeAttribute in patched method. Skipping class generation.");
                 }
                 
             } else if (referenceClassPath != null) {
