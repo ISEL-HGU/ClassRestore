@@ -7,19 +7,25 @@ import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 
 /**
- PatchWithJavassist 도구
- 
- 목적: 패치된 메소드의 16진수(Hex) 바이트코드를 원본 클래스 파일에 주입하는 도구입니다.
- 핵심 기능:
- 1. 바이트코드 파싱: Hex 문자열을 Java의 바이트 배열로 변환
- 2. CP Remapping: Reference Class(패치된 클래스)의 Constant Pool을 이용해 패치 데이터의 인덱스를 Target Class(원본 버그 클래스)에 맞게 자동 변환
- 3. ASM 프레임 재계산: 변조된 바이트코드의 StackMapTable을 ASM을 통해 새로 계산하여 VerifyError 방지
+ * ClassRestore: Javassist 기반 바이트코드 패치 및 복원 도구
+ * 
+ * 목적: 패치된 메소드의 16진수(Hex) 바이트코드를 원본 클래스 파일에 주입하여 무결성 있는 클래스 파일로 복구합니다.
+ * 핵심 기능:
+ * 1. 바이트코드 파싱: Hex 문자열을 Java의 바이트 배열 형식으로 디코딩
+ * 2. CP Remapping: Reference Class(패치된 클래스)의 Constant Pool을 참조하여 패치 데이터의 인덱스를 Target Class(원본 버그 클래스) 환경에 맞게 자동 변환
+ * 3. ASM 프레임 재계산: 변조된 바이트코드의 StackMapTable 구조를 ASM 엔진을 통해 새롭게 연산하여 VerifyError 및 로드 타임 오류 방지
  */
-public class PatchWithJavassist {
+public class ClassRestore {
+    /**
+     * 프로그램 진입점(Main Method). 
+     * 원본 클래스와 패치 데이터를 로드하고, 지정된 모드(--diff, --ref, 기본)에 따라 바이트코드 주입 및 ASM 프레임 재계산을 수행합니다.
+     * 
+     * @param args [0]: 원본 클래스 경로, [1]: 패치 Hex 파일 경로, [2]: 출력 클래스 경로, [3~4]: 옵션 플래그 및 부가 경로
+     */
     public static void main(String[] args) {
-        // 인자 파싱: 최소 3개
+        // 필수 인자 누락 검증
         if (args.length < 3) {
-            System.err.println("Usage: java -cp ... PatchWithJavassist <OriginalClassFile> <PatchedHexFile> <OutputClassFile> [--ref ReferenceClassFile | --diff OriginalHexFile]");
+            System.err.println("Usage: java -cp ... ClassRestore <OriginalClassFile> <PatchedHexFile> <OutputClassFile> [--ref ReferenceClassFile | --diff OriginalHexFile]");
             System.exit(1);
         }
 
@@ -179,6 +185,15 @@ public class PatchWithJavassist {
         }
     }
 
+    /**
+     * 대상(Target) 클래스에서 기존에 존재하는 원본 메소드를 타입과 시그니처에 맞추어 식별하고 제거합니다.
+     * 생성자, 정적 초기화 블록, 일반 메소드를 구분하여 처리합니다.
+     * 
+     * @param targetCc 패치 대상이 되는 Javassist CtClass 객체
+     * @param methodName 제거할 메소드의 이름
+     * @param methodDesc 제거할 메소드의 디스크립터(파라미터 및 반환 타입)
+     * @throws Exception 메소드 검색 또는 제거 과정 중 발생하는 예외
+     */
     private static void removeMethodFromTarget(CtClass targetCc, String methodName, String methodDesc) throws Exception {
         if (methodName.equals("<init>")) {
             for (CtConstructor c : targetCc.getConstructors()) {
@@ -205,6 +220,16 @@ public class PatchWithJavassist {
         }
     }
 
+    /**
+     * 16진수 바이트 배열을 파싱하여 구조화된 Javassist MethodInfo 객체로 변환합니다.
+     * 상수풀(Constant Pool)을 참조하여 메소드의 이름, 디스크립터, 접근 제어자 및 하위 속성(Attribute)들을 재조립합니다.
+     * 
+     * @param methodBytes 변환할 대상 메소드의 바이트 배열
+     * @param cp 현재 구조를 파싱할 기준이 되는 상수풀(Constant Pool) 객체
+     * @param isOriginal 파싱 대상이 원본(Buggy) 코드인지 여부 (실패 시 엄격한 예외 처리 여부를 결정)
+     * @return 파싱이 완료된 MethodInfo 객체
+     * @throws Exception 파싱 중 발생하는 I/O 또는 상수풀 참조 예외
+     */
     private static MethodInfo createMethodInfoFromBytes(byte[] methodBytes, ConstPool cp, boolean isOriginal) throws Exception {
         try (DataInputStream dis = new DataInputStream(new ByteArrayInputStream(methodBytes))) {
             int accessFlags = dis.readUnsignedShort();
@@ -349,6 +374,13 @@ public class PatchWithJavassist {
         }
     }
 
+    /**
+     * 16진수(Hex) 형식의 문자열을 순수 1바이트 배열(byte[])로 디코딩합니다.
+     * 2글자의 문자를 묶어 1바이트 단위로 변환하며, 유효하지 않은 문자는 무시합니다.
+     * 
+     * @param s 디코딩할 대상 16진수 문자열
+     * @return 변환된 바이트 배열
+     */
     public static byte[] hexStringToByteArray(String s) {
         int len = s.length();
         byte[] data = new byte[len / 2];

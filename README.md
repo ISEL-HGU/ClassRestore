@@ -3,14 +3,14 @@
 사용자께서 제안하신 **byteTok -> byteT5 -> Javassist Patch -> ASM Frame Compute** 파이프라인을 구현한 도구입니다.
 
 ## 1. 도구 개요
-이 도구(`PatchWithJavassist`)는 T5 모델이 생성한 16진수 바이트코드 문자열(Hex String)을 원본 클래스에 주입하고, **ASM을 사용하여 스택 프레임(Stack Map Table)을 자동으로 재계산**합니다.
+이 도구(`ClassRestore`)는 T5 모델이 생성한 16진수 바이트코드 문자열(Hex String)을 원본 클래스에 주입하고, **ASM을 사용하여 스택 프레임(Stack Map Table)을 자동으로 재계산**합니다.
 
 ### 주요 기능
 1.  **ASM 프레임 재계산**: `COMPUTE_FRAMES` 옵션으로 복잡한 스택 맵 테이블을 자동 생성하여 `VerifyError` 방지.
 2.  **CP Remapping (New)**: 패치 데이터가 다른 빌드 환경(Constant Pool)에서 생성된 경우, `Reference Class`를 통해 자동으로 인덱스를 매핑하여 주입.
 3.  **자동 무결성 검증 (New)**: 패치 완료 후 `javap`를 자동으로 실행하여 생성된 클래스 파일의 구조적 무결성을 즉시 검증.
 
-*   **위치**: `/data2/seungwook/ClassRestore/tools/PatchWithJavassist.java`
+*   **위치**: `/data2/seungwook/ClassRestore/tools/ClassRestore.java`
 *   **실행 스크립트**: `/data2/seungwook/ClassRestore/tools/run_patch.sh`
 *   **라이브러리**: `javassist.jar`, `asm.jar`
 
@@ -74,9 +74,9 @@ cd /data2/seungwook/ClassRestore/tools
 *   **결과**: 패치 횟수에 상관없이 기준이 되는 상수풀 번호판이 항상 완벽하게 보존되므로, 동일한 클래스에 대해 **무한정 다중 누적 패치(Sequential Patching)**가 가능해졌습니다.
 
 ### [2026-02-23] 클래스 초기화 정적 블록(`<clinit>`) 패치 불가 문제 해결
-*   **문제 상황**: `static { ... }` 으로 선언된 정적 초기화 블록에 대한 패치를 시도할 경우, `PatchWithJavassist`가 해당 메소드를 찾지 못하고 `javassist.NotFoundException: <clinit>(..) is not found` 에러를 발생시키며 중단되었습니다.
+*   **문제 상황**: `static { ... }` 으로 선언된 정적 초기화 블록에 대한 패치를 시도할 경우, `ClassRestore`가 해당 메소드를 찾지 못하고 `javassist.NotFoundException: <clinit>(..) is not found` 에러를 발생시키며 중단되었습니다.
 *   **원인**: Javassist의 일반적인 함수 검색 메서드인 `getMethod()`는 `<init>`(생성자)와 더불어 `<clinit>`(정적 블록)과 같은 특수 컴파일러 생성 함수를 식별하지 않기 때문입니다.
-*   **해결 방법**: 패치 대상 메소드의 이름이 `<clinit>`인 경우를 명시적으로 식별하여 일반 `getMethod()` 대신 `getClassInitializer()` 메서드를 사용하여 클래스 초기화 블록을 정확히 불러와 교체하도록 `PatchWithJavassist.java`의 로직 분기문을 추가 수정했습니다.
+*   **해결 방법**: 패치 대상 메소드의 이름이 `<clinit>`인 경우를 명시적으로 식별하여 일반 `getMethod()` 대신 `getClassInitializer()` 메서드를 사용하여 클래스 초기화 블록을 정확히 불러와 교체하도록 `ClassRestore.java`의 로직 분기문을 추가 수정했습니다.
 *   **결과**: 이제 T5 모델이 예측한 패치 데이터가 일반 함수, 생성자, 혹은 정적 초기화 블록(Static Block)이더라도 모두 완벽하게 식별하여 차분 패치 및 프레임 재계산을 수행할 수 있습니다.
 
 ### [2026-02-27] AI 모델의 상수풀 인덱스 환각(Hallucination) 방어 로직 구현

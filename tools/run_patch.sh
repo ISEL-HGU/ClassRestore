@@ -18,11 +18,32 @@ OUTPUT_DIR="../output"
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_PATH="$OUTPUT_DIR/$OUTPUT_FILENAME"
 
-# Run the patch tool
-# Assuming libs are in ./libs or current directory
-CLASSPATH=".:javassist.jar:asm.jar:libs/javassist.jar:libs/asm.jar"
+# Map original variables to new ones for clarity in the new section
+TARGET_CLASS="$ORIGINAL_CLASS"
+PATCH_HEX="$PATCHED_HEX"
+OUT_CLASS="$OUTPUT_PATH" # Note: OUTPUT_PATH is the full path, not just the filename
+CP=".:javassist.jar:asm.jar:libs/javassist.jar:libs/asm.jar" # Renamed CLASSPATH to CP
 
-java -cp "$CLASSPATH" PatchWithJavassist "$ORIGINAL_CLASS" "$PATCHED_HEX" "$OUTPUT_PATH" "${@:4}"
+# 1. 컴파일 (필요시)
+if [ ! -f "ClassRestore.class" ] || [ "ClassRestore.java" -nt "ClassRestore.class" ]; then
+    echo "Compiling ClassRestore..."
+    javac -cp "$CP" ClassRestore.java
+fi
+
+# 2. 패치 주입 (하위 호환성을 위해 MODE 플래그 감지)
+# The original script passed "${@:4}" which includes all arguments from the 4th onwards.
+# The new snippet explicitly checks for 5 arguments and passes $4 and $5.
+# If less than 5, it assumes the 4th argument is REF_CLASS.
+# We need to ensure $4 is correctly passed as REF_CLASS if it exists.
+# Let's align with the new snippet's logic.
+if [ "$#" -ge 5 ]; then
+    java -cp "$CP" ClassRestore "$TARGET_CLASS" "$PATCH_HEX" "$OUT_CLASS" "$4" "$5"
+else
+    # 기존 방식 (Ref Class)
+    # If $4 is not empty, it's the REF_CLASS
+    REF_CLASS="${@:4}" # This will be empty if no 4th arg, or contain the 4th arg.
+    java -cp "$CP" ClassRestore "$TARGET_CLASS" "$PATCH_HEX" "$OUT_CLASS" "$REF_CLASS"
+fi
 EXIT_CODE=$?
 
 if [ $EXIT_CODE -eq 0 ]; then
