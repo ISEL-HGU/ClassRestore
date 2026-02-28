@@ -39,7 +39,7 @@ cd /data2/seungwook/ClassRestore/tools
 
 #### 필수 인자 심층 설명
 *   **`<원본TXT>` (Original Hex)**:
-    *   **필수 항목**: 원본 바이트코드 텍스트(Buggy Hex)를 함께 제공하여, 오직 실질적인 로직(`CodeAttribute`)만 잘라내어 덮어씌웁니다. **무한한 다중/순차 패치(Sequential Patching)**가 필요한 경우 ಈ 방식을 사용해야 기존의 상수풀 인덱스가 보존됩니다.
+    *   **필수 항목**: 원본 바이트코드 텍스트(Buggy Hex)를 함께 제공하여, 오직 실질적인 로직(`CodeAttribute`)만 잘라내어 덮어씌웁니다. 무한한 다중/순차 패치(Sequential Patching)가 필요한 경우 해당 방식을 사용해야 기존의 상수풀 인덱스가 보존됩니다.
 
 #### 실행 결과 메시지
 *   `[SUCCESS]`: 패치 및 프레임 재계산 완료. 생성된 파일 경로 출력.
