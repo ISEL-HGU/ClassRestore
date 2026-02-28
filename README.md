@@ -25,42 +25,32 @@
 ### 단계 3: 클래스 패치 및 검증 (Javassist + ASM)
 
 `run_patch.sh` 스크립트를 사용하여 다음 작업을 한 번에 수행합니다:
-1.  **Patch Injection**: Hex 코드를 원본 클래스에 삽입 (필요 시 CP Remapping 수행).
+1.  **Patch Injection**: Hex 코드를 처리하여 실질적인 차분(로직)만 추출해 원본 클래스에 삽입.
 2.  **Frame Recomputation**: ASM을 이용해 스택 프레임 재계산.
 3.  **Verification**: `javap`를 이용해 출력 파일 무결성 검증.
 
 ```bash
-# 사용법: ./run_patch.sh <원본클래스> <패치된TXT> <출력파일명> [--ref ReferenceClass | --diff OriginalHexFile]
+# 사용법: ./run_patch.sh <원본클래스> <패치된TXT> <출력파일명> <원본TXT>
 cd /data2/seungwook/ClassRestore/tools
 
-# 모드 1: 차분 패치 (가장 권장) - 원본의 상수풀을 100% 유지하면서 코드부만 교체
-./run_patch.sh Original.class patched_method.txt Patched.class --diff original_method.txt
-
-# 모드 2: CP 리매핑 - 다른 클래스의 상수풀을 기준으로 작성된 패치를 원본에 맞게 변환
-./run_patch.sh Original.class patched_method.txt Patched.class --ref Reference.class
-
-# 모드 3: 직접 주입 - 패치 바이트코드가 원본 상수풀 인덱스와 완벽히 일치한다고 가정
-./run_patch.sh Original.class patched_method.txt Patched.class
+# 차분 패치 실행 - 원본의 상수풀을 100% 유지하면서 코드부만 교체
+./run_patch.sh Original.class patched_method.txt Patched.class original_method.txt
 ```
 
-#### 옵션 심층 설명 (`[--diff]` vs `[--ref]`)
-*   **`--diff OriginalHexFile` (차분 패치)**:
-    *   **권장 모드**: 원본 바이트코드 텍스트(Buggy Hex)를 함께 제공하여, 오직 실질적인 로직(`CodeAttribute`)만 잘라내어 덮어씌웁니다. **무한한 다중/순차 패치(Sequential Patching)**가 필요한 경우 이 모드를 사용해야 기존의 상수풀 인덱스가 보존됩니다.
-*   **`--ref ReferenceClass` (CP Remapping)**:
-    *   패치 데이터 생성 당시 기준이 되었던 클래스 파일. 이 클래스의 상수풀을 뒤져 패치 헥스 내의 상수 인덱스를 원본(Target) 클래스 번호로 매핑 및 변환해 주입합니다.
-*   **옵션 미 기재 시 (Direct Injection)**:
-    *   모델이 예측한 상수 인덱스가 대상 클래스와 100% 일치한다고 확신할 때 사용하는 기본(강제 덮어쓰기) 모드입니다.
+#### 필수 인자 심층 설명
+*   **`<원본TXT>` (Original Hex)**:
+    *   **필수 항목**: 원본 바이트코드 텍스트(Buggy Hex)를 함께 제공하여, 오직 실질적인 로직(`CodeAttribute`)만 잘라내어 덮어씌웁니다. **무한한 다중/순차 패치(Sequential Patching)**가 필요한 경우 ಈ 방식을 사용해야 기존의 상수풀 인덱스가 보존됩니다.
 
 #### 실행 결과 메시지
 *   `[SUCCESS]`: 패치 및 프레임 재계산 완료. 생성된 파일 경로 출력.
 *   `[VERIFIED]`: `javap` 검사 통과. 파일이 구조적으로 유효함.
-*   `[FAILURE]`: 패치 과정 중 오류 발생 (예: CP 불일치).
+*   `[FAILURE]`: 패치 과정 중 오류 발생 (예: 로직 구조 붕괴로 인한 예외).
 *   `[ERROR]`: 파일은 생성되었으나 `javap` 검사 실패 (파일 깨짐).
 
 ## 3. 작동 원리 (내부 로직)
 1.  **Hex 파싱**: 텍스트 파일의 바이트코드를 바이트 배열로 변환합니다.
 2.  **Javassist 주입**:
-    *   `Reference Class` 유무에 따라 `MethodInfo`를 생성하고, `CTMethod.copy` 등을 통해 원본 클래스로 이식합니다.
+    *   원본 및 패치된 `MethodInfo`를 대조하여, 순수 로직(`CodeAttribute`)만을 추출해 원본 클래스로 이식합니다.
 3.  **ASM 프레임 재계산**:
     *   `ASM ClassWriter(COMPUTE_FRAMES)`옵션을 사용하여 스택 맵 프레임을 재계산합니다.
 4.  **검증**:

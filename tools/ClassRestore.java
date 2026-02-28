@@ -24,30 +24,15 @@ public class ClassRestore {
      */
     public static void main(String[] args) {
         // 필수 인자 누락 검증
-        if (args.length < 3) {
-            System.err.println("Usage: java -cp ... ClassRestore <OriginalClassFile> <PatchedHexFile> <OutputClassFile> [--ref ReferenceClassFile | --diff OriginalHexFile]");
+        if (args.length < 4) {
+            System.err.println("Usage: java -cp ... ClassRestore <OriginalClassFile> <PatchedHexFile> <OutputClassFile> <OriginalHexFile>");
             System.exit(1);
         }
 
         String classFilePath = args[0];       // 원본 클래스 파일 경로 (Target)
         String hexFilePath = args[1];         // 패치 데이터(.txt) 파일 경로
         String outputFilePath = args[2];      // 결과물이 저장될 경로
-        
-        String referenceClassPath = null;
-        String originalHexPath = null;
-        
-        if (args.length >= 5) {
-            if ("--ref".equals(args[3])) {
-                referenceClassPath = args[4];
-            } else if ("--diff".equals(args[3])) {
-                originalHexPath = args[4];
-            }
-        } else if (args.length == 4) {
-            // 하위 호환성 (기존 스크립트가 4번째 인자로 Ref Class를 전달)
-            if (!args[3].startsWith("--")) {
-                referenceClassPath = args[3];
-            }
-        }
+        String originalHexPath = args[3];     // 원본 로직(.txt) 파일 경로 (필수)
 
         try {
             // 1. 패치 Hex 파싱
@@ -66,92 +51,61 @@ public class ClassRestore {
 
             ConstPool targetCp = targetCc.getClassFile().getConstPool();
 
-            if (originalHexPath != null) {
-                // =============== [MODE C] DIFFERENTIAL PATCHING ===============
-                System.out.println("Using Differential Patching Mode (--diff)");
-                System.out.println("Original Hex File: " + originalHexPath);
-                
-                // 원본 Hex 파일 읽기
-                if (!new File(originalHexPath).exists()) {
-                    System.err.println("Original Hex file not found: " + originalHexPath);
-                }
-                String origHexString = new String(Files.readAllBytes(Paths.get(originalHexPath))).trim().replaceAll("\\s+", "");
-                byte[] origMethodBytes = hexStringToByteArray(origHexString);
-                
-                // =============== FIX T5 HALLUCINATIONS ===============
-                System.out.println("Synchronizing attribute indices from Original Hex to Patched Hex...");
-                alignAttributeIndices(patchedMethodBytes, origMethodBytes, targetCp);
-                
-                // 원본 Hex를 타겟 CP로 파싱하여 정확한 메소드 이름/타입 알아내기
-                MethodInfo originalMethodInfo = createMethodInfoFromBytes(origMethodBytes, targetCp, true);
-                String methodName = originalMethodInfo.getName();
-                String methodDesc = originalMethodInfo.getDescriptor();
+            // =============== [DIFFERENTIAL PATCHING] ===============
+            System.out.println("Using Differential Patching Mode");
+            System.out.println("Original Hex File: " + originalHexPath);
+            
+            // 원본 Hex 파일 읽기
+            if (!new File(originalHexPath).exists()) {
+                System.err.println("Original Hex file not found: " + originalHexPath);
+            }
+            String origHexString = new String(Files.readAllBytes(Paths.get(originalHexPath))).trim().replaceAll("\\s+", "");
+            byte[] origMethodBytes = hexStringToByteArray(origHexString);
+            
+            // =============== FIX T5 HALLUCINATIONS ===============
+            System.out.println("Synchronizing attribute indices from Original Hex to Patched Hex...");
+            alignAttributeIndices(patchedMethodBytes, origMethodBytes, targetCp);
+            
+            // 원본 Hex를 타겟 CP로 파싱하여 정확한 메소드 이름/타입 알아내기
+            MethodInfo originalMethodInfo = createMethodInfoFromBytes(origMethodBytes, targetCp, true);
+            String methodName = originalMethodInfo.getName();
+            String methodDesc = originalMethodInfo.getDescriptor();
 
-                // 패치 데이터를 타겟 CP 기준으로 파싱 (이름 불일치 무시)
-                MethodInfo patchedMethodInfo = createMethodInfoFromBytes(patchedMethodBytes, targetCp, false);
+            // 패치 데이터를 타겟 CP 기준으로 파싱 (이름 불일치 무시)
+            MethodInfo patchedMethodInfo = createMethodInfoFromBytes(patchedMethodBytes, targetCp, false);
 
-                
-                // 타겟 클래스에서 원본 메소드 찾기
-                boolean isConstructor = methodName.equals("<init>");
-                boolean isClassInitializer = methodName.equals("<clinit>");
-                CtBehavior targetMethod = null;
-                
-                if (isConstructor) {
-                    for (CtConstructor c : targetCc.getConstructors()) {
-                        if (c.getMethodInfo().getDescriptor().equals(methodDesc)) {
-                            targetMethod = c;
-                            break;
-                        }
+            
+            // 타겟 클래스에서 원본 메소드 찾기
+            boolean isConstructor = methodName.equals("<init>");
+            boolean isClassInitializer = methodName.equals("<clinit>");
+            CtBehavior targetMethod = null;
+            
+            if (isConstructor) {
+                for (CtConstructor c : targetCc.getConstructors()) {
+                    if (c.getMethodInfo().getDescriptor().equals(methodDesc)) {
+                        targetMethod = c;
+                        break;
                     }
-                } else if (isClassInitializer) {
-                    targetMethod = targetCc.getClassInitializer();
-                } else {
-                    targetMethod = targetCc.getMethod(methodName, methodDesc);
                 }
-                
-                if (targetMethod == null) {
-                    throw new RuntimeException("Original method not found in target class!");
-                }
-                
-                // 핵심 차분 패치: CodeAttribute만 가져와서 갈아끼움
-                CodeAttribute patchedCodeAttr = patchedMethodInfo.getCodeAttribute();
-                if (patchedCodeAttr != null) {
-                    // 기존 메소드의 Code Attribute를 새 것으로 교체 (이름/접근제어자/상수풀 모두 원본 100% 보존)
-                    targetMethod.getMethodInfo().removeAttribute(patchedCodeAttr.getName());
-                    targetMethod.getMethodInfo().addAttribute(patchedCodeAttr);
-                    System.out.println("Successfully replaced CodeAttribute via differential patching.");
-                } else {
-                    throw new RuntimeException("Patch rejected: Malformed CodeAttribute in patched method. Skipping class generation.");
-                }
-                
-            } else if (referenceClassPath != null) {
-                // =============== [MODE A] CP REMAPPING ===============
-                System.out.println("Using Reference Class for Constant Pool: " + referenceClassPath);
-                File refFile = new File(referenceClassPath).getAbsoluteFile();
-                
-                ClassPool refPool = new ClassPool(true); 
-                refPool.insertClassPath(refFile.getParent());
-                CtClass refCc = null;
-                try (InputStream in = new FileInputStream(refFile)) {
-                    refCc = refPool.makeClass(in);
-                }
-                ConstPool refCp = refCc.getClassFile().getConstPool();
-                
-                MethodInfo patchedMethodInfo = createMethodInfoFromBytes(patchedMethodBytes, refCp, false);
-                
-                removeMethodFromTarget(targetCc, patchedMethodInfo.getName(), patchedMethodInfo.getDescriptor());
-                
-                CtMethod srcMethod = CtMethod.make(patchedMethodInfo, refCc);
-                CtMethod newMethod = CtNewMethod.copy(srcMethod, targetCc, null);
-                targetCc.addMethod(newMethod);
-                
+            } else if (isClassInitializer) {
+                targetMethod = targetCc.getClassInitializer();
             } else {
-                // =============== [MODE B] DIRECT INJECTION ===============
-                System.out.println("No Reference or Diff provided. Using Target Class Constant Pool for direct injection.");
-                MethodInfo patchedMethodInfo = createMethodInfoFromBytes(patchedMethodBytes, targetCp, false);
-                
-                removeMethodFromTarget(targetCc, patchedMethodInfo.getName(), patchedMethodInfo.getDescriptor());
-                targetCc.getClassFile().addMethod(patchedMethodInfo);
+                targetMethod = targetCc.getMethod(methodName, methodDesc);
+            }
+            
+            if (targetMethod == null) {
+                throw new RuntimeException("Original method not found in target class!");
+            }
+            
+            // 핵심 차분 패치: CodeAttribute만 가져와서 갈아끼움
+            CodeAttribute patchedCodeAttr = patchedMethodInfo.getCodeAttribute();
+            if (patchedCodeAttr != null) {
+                // 기존 메소드의 Code Attribute를 새 것으로 교체 (이름/접근제어자/상수풀 모두 원본 100% 보존)
+                targetMethod.getMethodInfo().removeAttribute(patchedCodeAttr.getName());
+                targetMethod.getMethodInfo().addAttribute(patchedCodeAttr);
+                System.out.println("Successfully replaced CodeAttribute via differential patching.");
+            } else {
+                throw new RuntimeException("Patch rejected: Malformed CodeAttribute in patched method. Skipping class generation.");
             }
 
             // 프레임 재계산 및 저장 (모든 모드 공통)
